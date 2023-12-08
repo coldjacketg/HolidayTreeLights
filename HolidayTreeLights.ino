@@ -4,7 +4,7 @@
 
 // How many leds in your strip?
 #define NUM_LEDS 300
-#define NUM_LIGHTS 50
+#define NUM_LIGHTS 75
 #define NUM_BAND_SIZE 50
 
 // For led chips like Neopixels, which have a data line, ground, and power, you just
@@ -126,6 +126,24 @@ void setLeds()
 {
   for (int i=0; i<NUM_LEDS; i++)
     setLed(i);
+}
+
+void setLedsFadeIn()
+{
+  for (byte i=0; i<NUM_LIGHTS; i++)
+    lightData[i].g = getHue();
+    
+  int brightness = 0;
+  while (brightness <= 255)
+  {
+    Serial.print("\nbrightness=");
+    Serial.print(brightness);
+    for (int i=0; i<NUM_LEDS; i++)
+      setLed(i, lightData[i%NUM_LIGHTS].g, getSaturation(), brightness);
+    brightness = brightness + 20;
+    delay(50);
+    FastLED.show();
+  }
 }
 
 void setLed(int led)
@@ -332,12 +350,11 @@ void handleMode()
           break;
         default:
           if ((mode != MODE_FADE) || (random(2) == 0))
-            setLeds();
-          else
-            getNewLights();
+            setLedsFadeIn();
+          getNewLights();
           break;
     }
-    fadeRate = random(20,50);
+    fadeRate = random(10,30);
   }
   else if (endingCounter > 1)
   {
@@ -466,9 +483,8 @@ void setup()
   // 0xFFA500  // orange (class)
   // 0xFF9900  // light orange
   // 0xFF9E0C  // light bright orange
-  candlePalette = CRGBPalette16( CRGB::DarkOrange, 0xFF7400, 0xFF9E0C, CRGB::Orange);
-
-  // 
+  // candlePalette = CRGBPalette16( CRGB::DarkOrange, 0xFF7400, 0xFF9E0C, CRGB::Orange);
+  candlePalette = CRGBPalette16( 0xFF9329, 0xFD841E, 0xFFA51F, 0xFF920D);
   endingCounter = 50;
 }
  
