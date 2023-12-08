@@ -2,25 +2,26 @@
 
 // How many leds in your strip?
 #define NUM_LEDS 300
+#define NUM_LIGHTS 100
+#define NUM_GLITTER 10
+
+#define UNASSIGNED -1
 
 // For led chips like Neopixels, which have a data line, ground, and power, you just
 // need to define DATA_PIN.  For led chipsets that are SPI based (four wires - data, clock,
 // ground, and power), like the LPD8806, define both DATA_PIN and CLOCK_PIN
 #define DATA_PIN 52
 
-#define STATE_COLOR      0
-#define STATE_RAINBOW    1
-#define STATE_WHITE      2
+#define COLOR_MODE_PASTEL              0
+#define COLOR_MODE_RAINBOW             1
+#define COLOR_MODE_WHITE               2
+#define COLOR_MODE_CANDLE              3
+#define COLOR_MODE_RAINBOW_GRADIENT    4
 
-#define STATE_LINKED     0
-#define STATE_UNLINKED   1
+#define HUES 256
+#define WARM_WHITE_HUE 30
 
-#define PIXEL_FADE_IN    1
-#define PIXEL_LIT        2
-#define PIXEL_FADE_OUT   3
-#define PIXEL_BLACK      4
-#define PIXEL_ENDING     5
-
+#define COLORS 6
 #define COLOR_RED     0
 #define COLOR_ORANGE  1
 #define COLOR_YELLOW  2
@@ -28,285 +29,355 @@
 #define COLOR_BLUE    4
 #define COLOR_PURPLE  5
 
+#define MODES 3
+#define MODE_FADE_OUT 0
+#define MODE_SPARKLE 1
+#define MODE_GLITTER 2
+#define MODE_GRADIENT 3
+
+#define MODE_FADE_START 2000
+#define MODE_FADE_END 2050
+
 // Define the array of leds
 CRGB leds[NUM_LEDS];
-byte hue[NUM_LEDS];
-byte colorState;
-byte pixelState[NUM_LEDS];
-byte linkedState;
-int index[NUM_LEDS];
-int litMin, litMax, darkMin, darkMax, fadeRate;
-int endingCounter;
 
-void setHueAll()
+int lightLed[NUM_LIGHTS];
+CRGB lightRGB[NUM_LIGHTS];
+byte lightDelay[NUM_LIGHTS];
+
+byte mode, color, gradientHue, gradientStart;
+int modeCounter, fadeRate;
+
+
+byte getRainbowHue(byte color)
 {
-  for(int i = 0; i < NUM_LEDS; i++)
+  byte hue;
+  switch (color)
   {
-    setHue(i);
+    case COLOR_RED:    hue = HSVHue::HUE_RED;     break;
+    case COLOR_ORANGE: hue = HSVHue::HUE_ORANGE;  break;
+    case COLOR_YELLOW: hue = HSVHue::HUE_YELLOW;  break;
+    case COLOR_GREEN:  hue = HSVHue::HUE_GREEN;   break;
+    case COLOR_BLUE:   hue = HSVHue::HUE_BLUE;    break;
+    case COLOR_PURPLE: hue = HSVHue::HUE_PURPLE;  break;
+  }
+  return hue;
+}
+
+byte getHue()
+{
+  byte hue;
+  switch (color)
+  {
+    case COLOR_MODE_RAINBOW_GRADIENT:
+      hue = gradientHue;
+      gradientHue = gradientHue + 3;  //byte wraps around from 255 to 0 automatically
+      break;
+    case COLOR_MODE_PASTEL:
+      hue = random(HUES);
+      break;
+    case COLOR_MODE_RAINBOW:
+      hue = getRainbowHue(random(COLORS));
+      break;
+    case COLOR_MODE_WHITE:
+    case COLOR_MODE_CANDLE:
+      hue = WARM_WHITE_HUE;
+      break;
+  }
+  return hue;
+}
+
+byte getSaturation()
+{
+  if (color == COLOR_MODE_WHITE)
+    return 180;
+  else
+    return 255;
+}
+
+void getNewLights()
+{
+  for (int i = 0; i < NUM_LIGHTS; i++)
+    getNewLight(i);
+}
+
+void getNewLight(byte index)
+{
+  boolean notFound = true;
+  while (notFound)
+  { 
+    lightLed[index] = random(NUM_LEDS);
+    notFound = false;
+    for (int i = 0; i < NUM_LIGHTS; i++)
+      if ((i != index) && (lightLed[i] == lightLed[index]))
+        notFound = true;
+  }
+  lightDelay[index] = random(50, 256);
+}
+
+void setLeds()
+{
+  setLeds(0);
+}
+
+void setLeds(byte start)
+{
+  gradientHue = 0;
+  int i = start + 1;
+  if (i == NUM_LEDS)
+    i = 0;
+  while (i != start)
+  {
+    setLed(i);
+    i++;
+    if (i == NUM_LEDS)
+      i = 0;
   }
 }
 
-void setHue(int pixel)
+void setLed(int index)
 {
-  if (colorState == STATE_COLOR)
+  leds[index] = CHSV(getHue(), getSaturation(), 255);
+}
+
+boolean isLit(int index)
+{
+  int rgbTotal = leds[index].r + leds[index].g + leds[index].b;
+  if (rgbTotal > 0)
+    return true;
+  else
+    return false;
+}
+
+boolean isWhite(int index)
+{
+  if ((leds[index].r == 255)
+        && (leds[index].g == 255)
+        && (leds[index].b == 255))
+    return true;
+  else
+    return false;
+}
+
+void handleLight(byte index)
+{
+  if (lightDelay[index] > 0)
   {
-    hue[pixel] = random(256);
+    lightDelay[index]--;
   }
-  else if (colorState == STATE_RAINBOW)
+  else
   {
-    byte newColor = random(6);
-    switch (newColor)
+    switch (mode)
     {
-      case COLOR_RED:    hue[pixel] = HSVHue::HUE_RED;     break;
-      case COLOR_ORANGE: hue[pixel] = HSVHue::HUE_ORANGE;  break;
-      case COLOR_YELLOW: hue[pixel] = HSVHue::HUE_YELLOW;  break;
-      case COLOR_GREEN:  hue[pixel] = HSVHue::HUE_GREEN;   break;
-      case COLOR_BLUE:   hue[pixel] = HSVHue::HUE_BLUE;    break;
-      case COLOR_PURPLE: hue[pixel] = HSVHue::HUE_PURPLE;  break;
+      case MODE_FADE_OUT:
+        if (isLit(lightLed[index]))
+        {
+          leds[lightLed[index]].fadeToBlackBy(fadeRate);
+        }
+        else
+        {
+          setLed(lightLed[index]);
+          getNewLight(index);
+        }
+        break;
+      case MODE_SPARKLE:
+        if (isWhite(lightLed[index]))
+        {
+          leds[lightLed[index]] = lightRGB[index];
+          getNewLight(index);
+        }
+        else
+        {
+          if (random(8) == 0)
+          {
+            lightRGB[index] = leds[lightLed[index]];
+            leds[lightLed[index]] = CRGB(255, 255, 255);
+          }
+          else
+            getNewLight(index);
+        }
+        break;
+      case MODE_GLITTER:
+        leds[lightLed[index]] = CHSV(getHue(), getSaturation(), 255);
+        getNewLight(index);
+        break;
     }
-  }
-  else  // colorState == STATE_WHITE
-  {
-    // warm white
-    hue[pixel] = 30;
   }
 }
 
-void displayColor(int pixel, byte brightness)
+void handleLights()
 {
-  if (brightness >= 0)
-  {
-    byte saturation;
-  
-    if (colorState == STATE_WHITE)
-    {
-      saturation = 180;
-    }
-    else
-    {
-      saturation = 255;
-    }
+  for (int i = 0; i < NUM_LIGHTS; i++)
+    handleLight(i);
+}
 
-    // early cut-off to black
-    if (brightness <= 2)
+void handleMode()
+{
+  if (modeCounter >= MODE_FADE_END)
+  {
+    modeCounter=0;
+    byte lastMode = mode;
+    byte lastColor = color;
+    // pick a new mode
+    while ((mode == lastMode) || (color == lastColor))
     {
-      brightness = 0;
+      mode = random(MODES);
+
+      if (mode == MODE_GRADIENT)
+        color = COLOR_MODE_RAINBOW_GRADIENT;
+      else
+      {
+        switch (random(7))
+        {
+          case 0:
+          case 1:
+          case 2:
+            color = COLOR_MODE_RAINBOW;
+            break;
+          case 3:
+          case 4:
+          case 5:
+            color = COLOR_MODE_WHITE;
+            break;
+          case 6:
+            color = COLOR_MODE_PASTEL;
+            break;
+        }
+      }
     }
     
-    leds[pixel] = CHSV(hue[pixel], saturation, brightness);
+    if (mode != MODE_GLITTER)
+      if ((mode != MODE_FADE_OUT) || (random(2) == 0))
+        setLeds();
+    if (mode == MODE_GRADIENT)
+      gradientStart = 0;
+    else
+      getNewLights();
+    fadeRate = random(20,50);
   }
-}
-
-void displayPixelState(int pixel)
-{
-  byte sourcePixel;
-  if (linkedState == STATE_LINKED)
+  else if (modeCounter >= MODE_FADE_START)
   {
-    sourcePixel = 0;
-  }
-  else
-  {
-    sourcePixel = pixel;
-  }
-  
-  switch (pixelState[sourcePixel])
-  {
-    case PIXEL_FADE_IN:
-      {
-        displayColor(pixel, 200 - index[sourcePixel]);
-      }
-      break;
-    case PIXEL_FADE_OUT:
-      {
-        displayColor(pixel, index[sourcePixel]);
-      }
-      break;
-  }
-}
-
-void updatePixelState(int pixel)
-{
-  index[pixel]--;
-  if (index[pixel] >= 0)
-  {
-    switch (pixelState[pixel])
-    {
-      case PIXEL_FADE_IN:
-      case PIXEL_FADE_OUT:
-        {
-          index[pixel]=index[pixel]-fadeRate;
-          displayPixelState[pixel];
-        }
-        break;
-    }
+    fadeToBlackBy(leds, NUM_LEDS, 20);
   }
   else
   {
-    switch (pixelState[pixel])
+    switch (mode)
     {
-      case PIXEL_BLACK:
-        {
-          // if linked, must set ALL the colors, not just leds[0]
-          if (linkedState == STATE_LINKED)
-          {
-            setHueAll();
-          }
-          else
-          {
-            setHue(pixel);
-          }
-
-          if (endingCounter > 0)
-          {
-            pixelState[pixel] = PIXEL_FADE_IN;
-            index[pixel] = 200;
-          }
-          else
-          {
-            pixelState[pixel] = PIXEL_ENDING;
-            index[pixel] = 0;
-          }
-
-          if (pixel == 0)
-          {
-            endingCounter--;
-          }
-        }
+      case MODE_FADE_OUT:
+      case MODE_SPARKLE:
+        handleLights();
         break;
-      case PIXEL_FADE_IN:
-        {
-          pixelState[pixel] = PIXEL_LIT;
-          index[pixel] = random(litMin, litMax);
-        }
+      case MODE_GLITTER:
+        fadeToBlackBy(leds, NUM_LEDS, fadeRate);
+        for (int i = 0; i < (NUM_GLITTER); i++)
+          setLed(random(NUM_LEDS));
         break;
-      case PIXEL_LIT:
-        {
-          pixelState[pixel] = PIXEL_FADE_OUT;
-          index[pixel] = 200;
-        }
+      case MODE_GRADIENT:
+        setLeds(gradientStart);
+        gradientStart++;
+        if (gradientStart > NUM_LEDS)
+          gradientStart = 0;
         break;
-      case PIXEL_FADE_OUT:
-        {
-          pixelState[pixel] = PIXEL_BLACK;
-          index[pixel] = random(darkMin, darkMax);
-        }
-
-        // decrement ending counter if pixel[0];
-        if (pixel == 0)
-        {
-          endingCounter--;
-        }
-        
-        break;
-    }
-  }
-}
-
-
-void handleStates()
-{
-  // display and update pixel states
-  for(int i = 0; i < NUM_LEDS; i++)
-  {
-    displayPixelState(i);
-    if ((linkedState != STATE_LINKED) || (i == 0))
-    {
-      updatePixelState(i);
     }
   }
   FastLED.show();
-
-  // handle overall state change
-  if (endingCounter <= 0)
-  {
-    int endedCount = 0;
-    for(int i = 0; i < NUM_LEDS; i++)
-    {
-      if (linkedState == STATE_LINKED)
-      {
-        if (pixelState[0] == PIXEL_ENDING)
-        {
-          endedCount++;
-        }
-//        Serial.print("\npixelState[0]=");
-//        Serial.print(pixelState[0]);
-//        Serial.print("endedCount=");
-//        Serial.print(endedCount);
-      }
-      else
-      {
-        if (pixelState[i] == PIXEL_ENDING)
-        {
-          endedCount++;
-        }
-//        Serial.print("\npixelState[");
-//        Serial.print(i);
-//        Serial.print("]=");
-//        Serial.print(pixelState[i]);
-//        Serial.print("endedCount=");
-//        Serial.print(endedCount);
-      }
-    }
-
-
-
-    if (endedCount == NUM_LEDS)
-    {
-      linkedState = random(2);
-      colorState = random(3);
-
-      if (linkedState == STATE_LINKED)
-      {
-        endingCounter = 1;
-        litMin = 500;
-        litMax = 1000;
-        darkMin = 25;
-        darkMax = 50;
-        fadeRate = 1;
-      }
-      else
-      {
-        endingCounter = 8;
-        litMin = 100;
-        litMax = 300;
-        darkMin = 100;
-        darkMax = 300;
-        fadeRate = random(1,5);
-      }
-
-      for(int i = 0; i < NUM_LEDS; i++)
-      {
-        pixelState[i] = PIXEL_BLACK;
-      }
-    }
-  }
+  modeCounter++;
 }
 
 
 void serialInfo()
 {
-  Serial.print("\nloop: endingCounter=");
-  Serial.print(endingCounter);
-  Serial.print("\nloop: linkedState=");
-  Serial.print(linkedState);
-  Serial.print(", colorState=");
-  Serial.print(colorState);
-  Serial.print(", litMin=");
-  Serial.print(litMin);
-  Serial.print(", litMax=");
-  Serial.print(litMax);
-  Serial.print(", pixelState[0]=");
-  Serial.print(pixelState[0]);
-  Serial.print(", pixelState[1]=");
-  Serial.print(pixelState[1]);
-  Serial.print(", index[0]=");
-  Serial.print(index[0]);
-  Serial.print(", index[1]=");
-  Serial.print(index[1]);
-  Serial.print(", hue[0]=");
-  Serial.print(hue[0]);
-  Serial.print(", hue[1]=");
-  Serial.print(hue[1]);
+  Serial.print("\nloop: modeCounter=");
+  Serial.print(modeCounter);
+  Serial.print(", mode=");
+  Serial.print(mode);
+  Serial.print(", color=");
+  Serial.print(color);
+  Serial.print(", fadeRate=");
+  Serial.print(fadeRate);
+  Serial.print(", lightLed[0]=");
+  Serial.print(lightLed[0]);
+  Serial.print(", lightDelay[0]=");
+  Serial.print(lightDelay[0]);
+  Serial.print(", lightRGB[0]=");
+  Serial.print(lightRGB[0].r);
+  Serial.print("/");
+  Serial.print(lightRGB[0].g);
+  Serial.print("/");
+  Serial.print(lightRGB[0].b);
+  Serial.print(", lightLed[1]=");
+  Serial.print(lightLed[1]);
+  Serial.print(", lightDelay[1]=");
+  Serial.print(lightDelay[1]);
+  Serial.print(", lightRGB[1]=");
+  Serial.print(lightRGB[1].r);
+  Serial.print("/");
+  Serial.print(lightRGB[1].g);
+  Serial.print("/");
+  Serial.print(lightRGB[1].b);
+  Serial.print(", lightLed[2]=");
+  Serial.print(lightLed[2]);
+  Serial.print(", lightDelay[2]=");
+  Serial.print(lightDelay[2]);
+  Serial.print(", lightRGB[2]=");
+  Serial.print(lightRGB[2].r);
+  Serial.print("/");
+  Serial.print(lightRGB[2].g);
+  Serial.print("/");
+  Serial.print(lightRGB[2].b);
+  Serial.print(", lightLed[3]=");
+  Serial.print(lightLed[3]);
+  Serial.print(", lightDelay[3]=");
+  Serial.print(lightDelay[3]);
+  Serial.print(", lightRGB[2]=");
+  Serial.print(lightRGB[3].r);
+  Serial.print("/");
+  Serial.print(lightRGB[3].g);
+  Serial.print("/");
+  Serial.print(lightRGB[3].b);
+  Serial.print(", lightLed[4]=");
+  Serial.print(lightLed[4]);
+  Serial.print(", lightDelay[4]=");
+  Serial.print(lightDelay[4]);
+  Serial.print(", lightRGB[4]=");
+  Serial.print(lightRGB[4].r);
+  Serial.print("/");
+  Serial.print(lightRGB[4].g);
+  Serial.print("/");
+  Serial.print(lightRGB[4].b);
+  Serial.print(", gradientStart=");
+  Serial.print(gradientStart);
+  Serial.print(", leds[0]=");
+  Serial.print(leds[0].r);
+  Serial.print("/");
+  Serial.print(leds[0].g);
+  Serial.print("/");
+  Serial.print(leds[0].b);
+  Serial.print(", leds[1]=");
+  Serial.print(leds[1].r);
+  Serial.print("/");
+  Serial.print(leds[1].g);
+  Serial.print("/");
+  Serial.print(leds[1].b);
+  Serial.print(", leds[2]=");
+  Serial.print(leds[2].r);
+  Serial.print("/");
+  Serial.print(leds[2].g);
+  Serial.print("/");
+  Serial.print(leds[2].b);
+  Serial.print(", leds[3]=");
+  Serial.print(leds[3].r);
+  Serial.print("/");
+  Serial.print(leds[3].g);
+  Serial.print("/");
+  Serial.print(leds[3].b);
+  Serial.print(", leds[4]=");
+  Serial.print(leds[4].r);
+  Serial.print("/");
+  Serial.print(leds[4].g);
+  Serial.print("/");
+  Serial.print(leds[4].b);
+  
 }
 
 void setup()
@@ -315,14 +386,12 @@ void setup()
   Serial.begin(115200);
   Serial.println("\nresetting");
   FastLED.addLeds<WS2811,DATA_PIN,RGB>(leds,NUM_LEDS);
-  linkedState = STATE_LINKED;
-  pixelState[0] = PIXEL_ENDING;
-  endingCounter = 0;
+  modeCounter = MODE_FADE_END;
 }
  
 void loop() { 
   // put your main code here, to run repeatedly:
   // serialInfo();
-  handleStates();
+  handleMode();
   delay(20);
 }
