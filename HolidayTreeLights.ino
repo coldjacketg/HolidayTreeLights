@@ -47,7 +47,7 @@ CRGB lightData[NUM_LIGHTS];
 // lightData.g for palette hue in MODE_CANDLE,
 // lightData[0]/lightData[1] for two RGB colors in MODE_GRADIENT with moving stripes
 
-CRGBPalette16 candlePalette;
+CRGBPalette16 emberPalette, candlePalette;
 
 byte mode, color, fadeRate, glitterChance, gradientStart;
 int endingCounter;
@@ -176,7 +176,7 @@ boolean isWhite(int led)
     return false;
 }
 
-void setCandle(byte light)
+void setCandle(byte light, boolean lit)
 {
   byte paletteIndex = lightData[light].r;  // use RGB red channel for candle palette hue
   paletteIndex = paletteIndex + random(30);  // gradual changes in color from the palette 
@@ -184,7 +184,10 @@ void setCandle(byte light)
   byte brightness = 255;
   if (random(10) == 0)  // 1/10 chance to flicker by a random amount
     brightness = random(200,255);
-  leds[lightLed[light]] = ColorFromPalette(candlePalette, paletteIndex, brightness);
+  if (lit)
+    leds[lightLed[light]] = ColorFromPalette(candlePalette, paletteIndex, brightness);
+  else
+    leds[lightLed[light]] = ColorFromPalette(emberPalette, paletteIndex, random(1,4));
 }
 
 
@@ -194,7 +197,7 @@ void handleLight(byte light)
   {
     lightDelay[light]--;
     if (mode == MODE_CANDLE)
-      setCandle(light);
+      setCandle(light, false);
   }
   else
   {
@@ -224,10 +227,7 @@ void handleLight(byte light)
         }
         break;
       case MODE_CANDLE:
-        if (isLit(lightLed[light]))
-          leds[lightLed[light]].fadeToBlackBy(fadeRate);
-        else
-          getNewLight(light);
+        setCandle(light, true);
         break;
       case MODE_SPARKLE:
         if (isWhite(lightLed[light]))
@@ -292,6 +292,7 @@ void handleMode()
           break;
       }
     }
+    
 
     switch (mode)
     {
@@ -338,12 +339,15 @@ void handleMode()
         case MODE_GLITTER:
         case MODE_GLITTER_WAVE:
           gradientStart = 0;
-          if (color == COLOR_MODE_WHITE)
-            glitterChance = random(5, 15);
-          else
-            glitterChance = random(1, 4);
           if (mode == MODE_GLITTER_WAVE)
-            glitterChance = glitterChance * 2;
+            glitterChance = random(2, 8);
+          else
+          {
+            if (color == COLOR_MODE_WHITE)
+              glitterChance = random(5, 15);
+            else
+              glitterChance = random(1, 4);
+          }
           break;
         case MODE_CANDLE:
           getNewLights();
@@ -476,6 +480,7 @@ void setup()
   Serial.print(seed);
   randomSeed(seed);
   FastLED.addLeds<WS2811,DATA_PIN,RGB>(leds,NUM_LEDS);
+  emberPalette = CRGBPalette16( CRGB::Brown, CRGB::OrangeRed, CRGB::SaddleBrown, CRGB::Red);
   // 0xFF4D00  // dark-red orange
   // 0xFF5E00  // red-orange
   // 0xFF7400  // darker orange
